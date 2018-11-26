@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block content %}
+	{% include "sidebar.html" ignore missing %}
+    <h1>Hi, {{ user.username }}!</h1>
+{% endblock %}
