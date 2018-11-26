@@ -2,8 +2,13 @@ import spacy
 
 from gensim.corpora import Dictionary
 from gensim.models import TfidfModel
+from gensim.interfaces import TransformedCorpus
+from gensim.matutils import sparse2full
+
+from sklearn.metrics.pairwise import linear_kernel
 
 import pandas as pd
+import numpy as np
 
 
 class TextProcessor:
@@ -18,15 +23,25 @@ class TextProcessor:
 
 	def load_tfidf_model(self):
 		return TfidfModel.load(self.model_file)
+
+	def load_tfidf_corpus(self):
+		return TransformedCorpus.load(self.tfidf_corpus)
+
+	def load_data(self):
+		return pd.read_csv(self.data, sep='\t')
+
  
 	def __init__(self, name):
 		self.name = name
 		self.nlp = spacy.load('en_core_web_sm')
 		self.dict_file = 'similarity_dictionary.dict'
 		self.model_file = 'tfidf.model'
+		self.tfidf_corpus = 'tfidf_corpus.dat'
+		self.data = 'train.tsv'
 		self.stoplist = ['you', 'Rooms', 'yourself', 'home', 'advantage', 'Premium_Amenities', 'Additional_features', 'distance','close_proximity', 'Conveniences', 'phones', 'Rec', 'comfort', 'style', 'guests', 'the_feel','it', 'the_centre', 'its_state', 'mind', 'everyone', 'colour', 'its_smell', 'Diesel', 'your_every_wish','Pictures', 'the_perfect_mix', 'the_lobby', 'Alternative_service', 'the_rooms', 'the_city', 'the_heart','charge', 'renovation', 'iron_gate', 'its_original_facade', 'its_owners', 'collectors', 'a_place', 'the_trade', 'the_rhythm', 'its_citizens', 'they', 'day', 'any_time', 'a_treat', 'a_stay', 'name','location', 'Property_Location', 'use', 'convenient_amenities', 'two_buildings', 'Modern', 'Attentive_service', 'the_greatest_movie_stars', 'your_well-being', 'the_view', 'the_hotel','a_fee', 'This_hotel', 'the_air', 'an_era', 'the_details', 'The_hotel', 'minutes', 'we', 'this_wifi', 'one', 'hotel', 'the_option', 'them', 'themselves', 'different_categories', 'comforts','the_importance', 'the_team', 'proactivity', 'a_wide_range', 'guest', 'I']
 		self.dictionary = None
 		self.model = self.load_tfidf_model()
+		self.df = self.load_data()
         
 	def remove_br(self,text):
 	    desc = text.replace(" <br/>", ": ").replace("<br/ ", '')
@@ -80,3 +95,45 @@ class TextProcessor:
 		d2b = self.get_doc2bow([noun_list])
 		d2b_tfidf_fitted = self.fit_tfidf_model(d2b)
 		return d2b_tfidf_fitted.sort_values(by=['Weight'], ascending=False, inplace=False)
+
+	def get_hotel_list(self):
+		estab_list = []
+		for estab in self.df['EstablishmentTitle_x'].tolist():
+			estab_list.append({'label':estab, 'value':estab})
+		return estab_list
+
+	def get_cosine_similarity(self):
+		corpus_tfidf = self.load_tfidf_corpus()
+		dictionary = self.load_dict()
+		docs_vecs = np.vstack([sparse2full(c, len(dictionary)) for c in corpus_tfidf])
+		cosine_sim = linear_kernel(docs_vecs, docs_vecs)
+		return cosine_sim
+
+
+	def get_recommendations(self,title):
+		df = self.df
+		cosine_sim=self.get_cosine_similarity()
+		indices = pd.Series(df.index, index=df['EstablishmentTitle_x']).drop_duplicates()
+		idx = indices[title]
+		# print type(idx)
+		if isinstance(idx, pd.Series):
+			idx = idx[0]
+		# Get the pairwsie similarity scores of all movies with that movie
+		sim_scores = list(enumerate(cosine_sim[idx]))
+		# Sort the movies based on the similarity scores
+		sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+		# Get the scores of the 5 most similar movies
+		sim_scores = sim_scores[1:6]
+
+		# Get the movie indices
+		hotel_indices = [i[0] for i in sim_scores]
+		scores  =[i[1] for i in sim_scores]
+
+		estab_list = []
+		for idx, estab in enumerate(df['EstablishmentTitle_x'].iloc[hotel_indices]):
+			estab_list.append({'EstablishmentTitle':estab, 'SimilarityScore':scores[idx]})
+
+		similar_df = pd.DataFrame.from_dict(estab_list)
+		print similar_df
+		# Return the top 5 most similar movies
+		return similar_df
